@@ -1,6 +1,5 @@
 import cv2
 import numpy as np
-#from skimage.measure import compare_ssim as ssim
 
 cv2.namedWindow("preview")
 maxCounter = 180000
@@ -46,7 +45,6 @@ def testWebcam(requested_width, requested_height):
         cv2.imshow("preview", frame)
         prevFrame = frame
         rval, frame = vc.read()
-        #similarityIndex = ssim(prevFrame, frame)
         gray_img1 = cv2.cvtColor(prevFrame, cv2.COLOR_BGR2GRAY)
         gray_img2 = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         error = mse(gray_img1, gray_img2)
