@@ -47,33 +47,24 @@ def testWebcamLiveChart(requested_width, requested_height, duration=30):
     webcam_label = ttk.Label(root)
     webcam_label.grid(row=0, column=0, padx=10, pady=10)
 
-    # Chart for deltas on the right
-    fig_deltas = Figure(figsize=(5, 4), dpi=100)
-    ax_deltas = fig_deltas.add_subplot(111)
-    ax_deltas.set_title("Live Frame Capture Deltas")
+    # Single chart with two y-axes
+    fig = Figure(figsize=(8, 4), dpi=100)
+    ax_deltas = fig.add_subplot(111)
+    ax_deltas.set_title("Live Frame Capture Deltas and Average FPS")
     ax_deltas.set_xlabel("Time (seconds)")
-    ax_deltas.set_ylabel("Delta Time (ms)")
+    ax_deltas.set_ylabel("Delta Time (ms)", color="red")
     line_deltas, = ax_deltas.plot([], [], color="red", label="Delta Between Frames")
-    ax_deltas.legend()
+    ax_deltas.tick_params(axis="y", labelcolor="red")
     ax_deltas.grid(True)
 
-    canvas_deltas = FigureCanvasTkAgg(fig_deltas, master=root)
-    canvas_deltas_widget = canvas_deltas.get_tk_widget()
-    canvas_deltas_widget.grid(row=0, column=1, padx=10, pady=10)
-
-    # Chart for average FPS on the far right
-    fig_fps = Figure(figsize=(5, 4), dpi=100)
-    ax_fps = fig_fps.add_subplot(111)
-    ax_fps.set_title("Live Average Effective FPS")
-    ax_fps.set_xlabel("Time (seconds)")
-    ax_fps.set_ylabel("FPS")
+    ax_fps = ax_deltas.twinx()  # Create a second y-axis
+    ax_fps.set_ylabel("FPS", color="blue")
     line_avg_fps, = ax_fps.plot([], [], color="blue", label="Average Effective FPS")
-    ax_fps.legend()
-    ax_fps.grid(True)
+    ax_fps.tick_params(axis="y", labelcolor="blue")
 
-    canvas_fps = FigureCanvasTkAgg(fig_fps, master=root)
-    canvas_fps_widget = canvas_fps.get_tk_widget()
-    canvas_fps_widget.grid(row=0, column=2, padx=10, pady=10)
+    canvas = FigureCanvasTkAgg(fig, master=root)
+    canvas_widget = canvas.get_tk_widget()
+    canvas_widget.grid(row=0, column=1, padx=10, pady=10)
 
     running = True
 
@@ -116,24 +107,24 @@ def testWebcamLiveChart(requested_width, requested_height, duration=30):
             root.after(wait_time, update_webcam)
 
     def update_chart():
-        """Update the live charts with new data."""
-        # Update deltas chart
+        """Update the live chart with new data."""
         if len(capture_times) > 1:
+            # Update deltas
             deltas_x = capture_times[1:]
             deltas_y = [delta * 1000 for delta in deltas]  # Convert to milliseconds
             line_deltas.set_data(deltas_x, deltas_y)
             ax_deltas.set_xlim(0, max(deltas_x))
             ax_deltas.set_ylim(0, max(deltas_y) if deltas_y else 1)
-            canvas_deltas.draw()
 
-        # Update average FPS chart
         if len(avg_frame_rates) > 0:
+            # Update average FPS
             fps_x = capture_times[-len(avg_frame_rates):]
             fps_y = avg_frame_rates
             line_avg_fps.set_data(fps_x, fps_y)
             ax_fps.set_xlim(0, max(fps_x))
             ax_fps.set_ylim(0, max(fps_y) if fps_y else 1)
-            canvas_fps.draw()
+
+        canvas.draw()
 
         if running:
             root.after(500, update_chart)
@@ -185,7 +176,7 @@ def main():
 
     for width, height in resolutions:
         print(f"Starting test for resolution {width} x {height}")
-        result = testWebcamLiveChart(width, height, 60)  # 60 seconds duration
+        result = testWebcamLiveChart(width, height, 60*60)  # 60 seconds duration
         if result:
             results.append(result)
             print(f"Resolution {result['resolution']}: SUCCESS, Frames Captured: {result['captured_frames']}")
