@@ -39,7 +39,7 @@ def testWebcamLiveChart(requested_width, requested_height, duration=30):
 
     # Tkinter setup
     root = tk.Tk()
-    root.title("Webcam Test with Live Chart")
+    root.title(f"Webcam Test - {requested_width}x{requested_height}")
 
     # Webcam frame on the left
     webcam_label = ttk.Label(root)
@@ -93,9 +93,11 @@ def testWebcamLiveChart(requested_width, requested_height, duration=30):
             #frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             frame_image = tk.PhotoImage(data=cv2.imencode(".ppm", frame)[1].tobytes())
             webcam_label.image = frame_image  # Persist the PhotoImage object
+            #print(f"Frame {frame_count} captured at {current_time:.2f} seconds")
             webcam_label.configure(image=frame_image)
 
         if time.time() - start_time >= duration or not running:
+            print("Test completed or window closed.")
             vc.release()
             root.quit()
         else:
@@ -113,6 +115,10 @@ def testWebcamLiveChart(requested_width, requested_height, duration=30):
     update_webcam()
     root.mainloop()
 
+    # Ensure the root window is destroyed after the test
+    if root.winfo_exists():
+        root.destroy()
+
     return {
         "resolution": f"{width} x {height}",
         "captured_frames": frame_count,
@@ -123,18 +129,22 @@ def main():
     """Main function to test multiple resolutions with live charts."""
     resolutions = [
         (640, 480),
-        (1280, 720)
+        (1920, 1080)
     ]
     results = []
 
     for width, height in resolutions:
         print(f"Starting test for resolution {width} x {height}")
-        result = testWebcamLiveChart(width, height, 60)
+        result = testWebcamLiveChart(width, height, 5)
         if result:
             results.append(result)
             print(f"Resolution {result['resolution']}: SUCCESS, Frames Captured: {result['captured_frames']}")
         else:
             print(f"Resolution {width} x {height}: FAILED")
+
+    print("\nSummary of Results:")
+    for result in results:
+        print(f"Resolution {result['resolution']}: Captured Frames: {result['captured_frames']}")
 
 if __name__ == "__main__":
     main()
