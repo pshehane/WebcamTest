@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 import time
+import matplotlib.pyplot as plt
 
 cv2.namedWindow("preview")
 font = cv2.FONT_HERSHEY_SIMPLEX
@@ -47,14 +48,17 @@ def testWebcam(requested_width, requested_height, duration=30):
     refocus_count = 0
     prev_frame = None
     start_time = time.time()
+    frame_timestamps = []  # Track timestamps of frame captures
 
     while time.time() - start_time < duration:
         rval, frame = vc.read()
         if not rval:
             print("Warning: Failed to read frame.")
+            frame_timestamps.append((time.time() - start_time, 0))  # Frame dropped
             continue
 
         frame_count += 1
+        frame_timestamps.append((time.time() - start_time, 1))  # Frame successfully captured
         if prev_frame is not None:
             gray_img1 = cv2.cvtColor(prev_frame, cv2.COLOR_BGR2GRAY)
             gray_img2 = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -65,8 +69,8 @@ def testWebcam(requested_width, requested_height, duration=30):
                 refocus_count += 1
 
         remaining_frames = max(0, int(fps * duration) - frame_count)
-        cv2.putText(frame, f"{width} x {height} @ {fps:.2f} Remaining: {remaining_frames}", org, font, fontScale, color, thickness)
-        cv2.putText(frame, f"Bad Frames: {bad_frame_count}, Refocuses: {refocus_count}", (org[0], org[1] + 30), font, fontScale, color, thickness)
+        #cv2.putText(frame, f"{width} x {height} @ {fps:.2f} Remaining: {remaining_frames}", org, font, fontScale, color, thickness)
+        #cv2.putText(frame, f"Bad Frames: {bad_frame_count}, Refocuses: {refocus_count}", (org[0], org[1] + 30), font, fontScale, color, thickness)
         cv2.imshow("preview", frame)
 
         prev_frame = frame
@@ -87,17 +91,64 @@ def testWebcam(requested_width, requested_height, duration=30):
         "captured_frames": frame_count,
         "dropped_frames": dropped_frames,
         "bad_frames": bad_frame_count,
-        "refocuses": refocus_count
+        "refocuses": refocus_count,
+        "frame_timestamps": frame_timestamps
     }
+
+def plot_frame_status(results):
+    """Plot the frame success vs. drop timeline for each resolution using timestamps."""
+    for result in results:
+        if "frame_timestamps" not in result:
+            continue
+        frame_timestamps = result["frame_timestamps"]
+        resolution = result["resolution"]
+
+        times = [timestamp[0] for timestamp in frame_timestamps]  # Extract timestamps for x-axis
+        statuses = [timestamp[1] for timestamp in frame_timestamps]  # Extract statuses for y-axis
+
+        plt.figure()
+        plt.step(times, statuses, where="post", label="Frame Status (1=Success, 0=Drop)", color="blue")
+        plt.title(f"Frame Timeline for {resolution}")
+        plt.xlabel("Time (seconds)")  # Correctly label x-axis as time
+        plt.ylabel("Frame Status")  # Correctly label y-axis as frame status
+        plt.legend()
+        plt.grid(True)
+        plt.show()
+
+def plot_frame_timestamps(results):
+    """Plot the deltas between frame captures for each resolution."""
+    for result in results:
+        if "frame_timestamps" not in result:
+            continue
+        frame_timestamps = result["frame_timestamps"]
+        resolution = result["resolution"]
+
+        # Extract timestamps for successful frames (status = 1)
+        capture_times = [timestamp[0] for timestamp in frame_timestamps if timestamp[1] == 1]
+
+        # Calculate deltas (time differences) between consecutive timestamps
+        deltas = [capture_times[i] - capture_times[i - 1] for i in range(1, len(capture_times))]
+
+        plt.figure()
+        # Commented out frame capture times
+        # plt.scatter(capture_times, [1] * len(capture_times), label="Frame Captures", color="blue", marker="o")
+        if deltas:
+            plt.plot(capture_times[1:], deltas, label="Delta Between Frames", color="red")  # Solid red line
+        plt.title(f"Frame Capture Deltas for {resolution}")
+        plt.xlabel("Time (seconds)")  # X-axis shows time
+        plt.ylabel("Delta Time (seconds)")  # Updated y-axis label
+        plt.legend()
+        plt.grid(True, which="both", linestyle="--", linewidth=0.5)  # Add gridlines
+        plt.show()
 
 def main():
     """Main function to test multiple resolutions."""
     resolutions = [
-        (640, 360),
+        #(640, 360),
         (640, 480),
-        (800, 600),
-        (1280, 720),
-        (1920, 1080),
+        #(800, 600),
+        #(1280, 720),
+        #(1920, 1080),
         (1600, 1200)
     ]
     total_tests = len(resolutions)
@@ -107,21 +158,33 @@ def main():
 
     for width, height in resolutions:
         print(f"Starting test for resolution {width} x {height}")
-        result = testWebcam(width, height, 10)
+        result = testWebcam(width, height, 60*10)
         if result:
             successful_tests += 1
             total_frames_captured += result["captured_frames"]
-            results.append(f"Resolution {result['resolution']}: SUCCESS, Frames Captured: {result['captured_frames']}, Dropped: {result['dropped_frames']}, Bad: {result['bad_frames']}, Refocuses: {result['refocuses']}")
+            results.append(result)
+            print(f"Resolution {result['resolution']}: SUCCESS, Frames Captured: {result['captured_frames']}, Dropped: {result['dropped_frames']}, Bad: {result['bad_frames']}, Refocuses: {result['refocuses']}")
         else:
-            results.append(f"Resolution {width} x {height}: FAILED")
+            results.append({"resolution": f"{width} x {height}", "status": "FAILED"})
+            print(f"Resolution {width} x {height}: FAILED")
 
     print("\nSummary of Results:")
     for result in results:
-        print(result)
+        if "status" in result and result["status"] == "FAILED":
+            print(f"Resolution {result['resolution']}: FAILED")
+        else:
+            print(f"Resolution {result['resolution']}: SUCCESS, Frames Captured: {result['captured_frames']}, Dropped: {result['dropped_frames']}, Bad: {result['bad_frames']}, Refocuses: {result['refocuses']}")
+
     print(f"\nTotal Resolutions Tested: {total_tests}")
     print(f"Successful Tests: {successful_tests}")
     print(f"Failed Tests: {total_tests - successful_tests}")
     print(f"Total Frames Captured: {total_frames_captured}")
+
+    # Plot frame status for each resolution
+    #plot_frame_status(results)
+
+    # Plot frame timestamps for each resolution
+    plot_frame_timestamps(results)
 
 if __name__ == "__main__":
     main()
