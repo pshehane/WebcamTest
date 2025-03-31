@@ -1,222 +1,182 @@
-import os
+# Required pip install commands to run this script:
+# pip install opencv-python
+# pip install PyQt5
+# pip install matplotlib
+# pip install numpy
+# pip install platformdirs
+# pip install csv
+# Ensure you have Python 3.6+ installed.
+# For MacOS, ensure you have the latest version of PyQt5 and OpenCV installed.
+# Run the script using: python WebcamTest.py
+
+import sys
 import cv2
 import time
-import tkinter as tk
-from tkinter import ttk
-from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-from matplotlib.figure import Figure
-import csv
 import platform
-import warnings
+import csv
+from PyQt5.QtWidgets import QApplication, QMainWindow, QLabel, QVBoxLayout, QWidget
+from PyQt5.QtGui import QImage, QPixmap
+from PyQt5.QtCore import QTimer
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
 
-# Suppress deprecation warnings
-warnings.filterwarnings("ignore", category=DeprecationWarning)
+class WebcamTest(QMainWindow):
+    def __init__(self, requested_width, requested_height, duration=30):
+        super().__init__()
+        self.setWindowTitle(f"Webcam Test - {requested_width}x{requested_height}")
+        self.requested_width = requested_width
+        self.requested_height = requested_height
+        self.duration = duration
 
-# Ensure Tkinter works correctly on MacOS
-os.environ["TK_SILENCE_DEPRECATION"] = "1"
+        # Webcam setup
+        if platform.system() == "Darwin":  # MacOS
+            self.vc = cv2.VideoCapture(0, cv2.CAP_AVFOUNDATION)
+        else:  # Default to Windows (or other platforms)
+            self.vc = cv2.VideoCapture(0, cv2.CAP_DSHOW)
 
-def testWebcamLiveChart(requested_width, requested_height, duration=30):
-    """Test the webcam at a specific resolution for a given duration with a live chart."""
-    print(f"Testing {requested_width} x {requested_height} for {duration} seconds")
+        self.vc.set(cv2.CAP_PROP_FRAME_WIDTH, requested_width)
+        self.vc.set(cv2.CAP_PROP_FRAME_HEIGHT, requested_height)
 
-    # Use platform-specific backend for webcam capture
-    if platform.system() == "Darwin":  # MacOS
-        vc = cv2.VideoCapture(0, cv2.CAP_AVFOUNDATION)
-    else:  # Default to Windows (or other platforms)
-        vc = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+        if not self.vc.isOpened():
+            print("Error: Unable to open webcam.")
+            sys.exit()
 
-    vc.set(cv2.CAP_PROP_FRAME_WIDTH, requested_width)
-    vc.set(cv2.CAP_PROP_FRAME_HEIGHT, requested_height)
+        self.width = int(self.vc.get(cv2.CAP_PROP_FRAME_WIDTH))
+        self.height = int(self.vc.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        self.fps = self.vc.get(cv2.CAP_PROP_FPS)
+        if self.fps <= 0:
+            print("Error: Unable to determine FPS. Defaulting to 30.")
+            self.fps = 30
+        self.wait_time = int(1000.0 / self.fps)
+        print(f"Actual resolution: {self.width} x {self.height}, FPS: {self.fps:.2f}")
 
-    if not vc.isOpened():
-        print("Error: Unable to open webcam.")
-        return None
+        # Data tracking
+        self.frame_count = 0
+        self.start_time = time.time()
+        self.capture_times = []
+        self.deltas = []
+        self.avg_frame_rates = []
+        self.prev_time = None
 
-    width = int(vc.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(vc.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    fps = vc.get(cv2.CAP_PROP_FPS)
-    if fps <= 0:  # Ensure FPS is valid
-        print("Error: Unable to determine FPS. Defaulting to 30.")
-        fps = 30
-    wait_time = int(1000.0 / float(fps))  # Safe calculation after validation
-    print(f"Actual resolution: {width} x {height}, FPS: {fps:.2f}")
+        # GUI setup
+        self.init_ui()
 
-    if (requested_width != width) or (requested_height != height):
-        print("Warning: Unable to support requested width and height.")
-        vc.release()
-        return None
+        # Timer for updating webcam and charts
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.update_webcam)
+        self.timer.start(self.wait_time)
 
-    frame_count = 0
-    start_time = time.time()
-    capture_times = []  # Track timestamps of successful frame captures
-    deltas = []  # Track deltas between consecutive frame captures
-    avg_frame_rates = []  # Track average effective frame rates
-    prev_time = None  # Initialize prev_time
-    timeout_start = time.time()  # Initialize timeout_start
+    def init_ui(self):
+        """Initialize the UI components."""
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
 
-    # Tkinter setup
-    root = tk.Tk()
-    root.title(f"Webcam Test - {requested_width}x{requested_height}")
+        # Webcam display
+        self.webcam_label = QLabel(self)
+        self.webcam_label.setFixedSize(640, 480)
 
-    # Webcam frame on the left
-    webcam_label = ttk.Label(root)
-    webcam_label.grid(row=0, column=0, padx=10, pady=10)
+        # Matplotlib figure for charts
+        self.fig = Figure(figsize=(8, 4), dpi=100)
+        self.ax_deltas = self.fig.add_subplot(111)
+        self.ax_deltas.set_title("Live Frame Capture Deltas and Average FPS")
+        self.ax_deltas.set_xlabel("Time (seconds)")
+        self.ax_deltas.set_ylabel("Delta Time (ms)", color="red")
+        self.line_deltas, = self.ax_deltas.plot([], [], color="red", label="Delta Between Frames")
+        self.ax_deltas.tick_params(axis="y", labelcolor="red")
+        self.ax_deltas.grid(True)
 
-    # Single chart with two y-axes
-    fig = Figure(figsize=(8, 4), dpi=100)
-    ax_deltas = fig.add_subplot(111)
-    ax_deltas.set_title("Live Frame Capture Deltas and Average FPS")
-    ax_deltas.set_xlabel("Time (seconds)")
-    ax_deltas.set_ylabel("Delta Time (ms)", color="red")
-    line_deltas, = ax_deltas.plot([], [], color="red", label="Delta Between Frames")
-    ax_deltas.tick_params(axis="y", labelcolor="red")
-    ax_deltas.grid(True)
+        self.ax_fps = self.ax_deltas.twinx()
+        self.ax_fps.set_ylabel("FPS", color="blue")
+        self.line_avg_fps, = self.ax_fps.plot([], [], color="blue", label="Average Effective FPS")
+        self.ax_fps.tick_params(axis="y", labelcolor="blue")
 
-    ax_fps = ax_deltas.twinx()  # Create a second y-axis
-    ax_fps.set_ylabel("FPS", color="blue")
-    line_avg_fps, = ax_fps.plot([], [], color="blue", label="Average Effective FPS")
-    ax_fps.tick_params(axis="y", labelcolor="blue")
+        self.canvas = FigureCanvas(self.fig)
 
-    canvas = FigureCanvasTkAgg(fig, master=root)
-    canvas_widget = canvas.get_tk_widget()
-    canvas_widget.grid(row=0, column=1, padx=10, pady=10)
+        # Layout
+        layout = QVBoxLayout()
+        layout.addWidget(self.webcam_label)
+        layout.addWidget(self.canvas)
+        central_widget.setLayout(layout)
 
-    running = True
-
-    def update_webcam():
-        """Update the webcam frame."""
-        nonlocal frame_count, capture_times, deltas, avg_frame_rates, prev_time, timeout_start
-        timeout_duration = 5  # Timeout duration in seconds
-
-        rval, frame = vc.read()
+    def update_webcam(self):
+        """Update the webcam frame and charts."""
+        rval, frame = self.vc.read()
         if rval:
-            timeout_start = time.time()  # Reset timeout on successful frame capture
-            frame_count += 1
-            current_time = time.time() - start_time
-            capture_times.append(current_time)
+            self.frame_count += 1
+            current_time = time.time() - self.start_time
+            self.capture_times.append(current_time)
 
-            if prev_time is not None:
-                delta = current_time - prev_time
-                deltas.append(delta)
+            if self.prev_time is not None:
+                delta = current_time - self.prev_time
+                self.deltas.append(delta)
 
                 # Calculate average FPS using a rolling window with a max size of 24
-                window_size = min(len(deltas), 24)
-                avg_fps = 1 / (sum(deltas[-window_size:]) / window_size)
-                avg_frame_rates.append(avg_fps)
+                window_size = min(len(self.deltas), 24)
+                avg_fps = 1 / (sum(self.deltas[-window_size:]) / window_size)
+                self.avg_frame_rates.append(avg_fps)
 
-            prev_time = current_time
+            self.prev_time = current_time
 
-            # Resize frame to 640x480 before displaying
+            # Resize frame to 640x480 and convert to QImage
             frame = cv2.resize(frame, (640, 480))
-            # Convert frame to RGB and display in Tkinter
             frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            frame_image = tk.PhotoImage(data=cv2.imencode(".ppm", frame)[1].tobytes())
-            webcam_label.image = frame_image  # Persist the PhotoImage object
-            webcam_label.configure(image=frame_image)
+            image = QImage(frame.data, frame.shape[1], frame.shape[0], QImage.Format_RGB888)
+            pixmap = QPixmap.fromImage(image)
+            self.webcam_label.setPixmap(pixmap)
 
-        if time.time() - start_time >= duration or not running:
-            print("Test completed or window closed.")
-            vc.release()
-            root.quit()
-        else:
-            root.after(wait_time, update_webcam)
+            # Update charts
+            self.update_chart()
 
-    def update_chart():
+        if time.time() - self.start_time >= self.duration:
+            print("Test completed.")
+            self.timer.stop()
+            self.vc.release()
+            self.save_data_to_csv()
+
+    def update_chart(self):
         """Update the live chart with new data."""
-        if len(capture_times) > 1:
+        if len(self.capture_times) > 1:
             # Update deltas
-            deltas_x = capture_times[1:]
-            deltas_y = [delta * 1000 for delta in deltas]  # Convert to milliseconds
-            line_deltas.set_data(deltas_x, deltas_y)
-            ax_deltas.set_xlim(0, max(deltas_x))
-            ax_deltas.set_ylim(0, max(deltas_y) if deltas_y else 1)
+            deltas_x = self.capture_times[1:]
+            deltas_y = [delta * 1000 for delta in self.deltas]  # Convert to milliseconds
+            self.line_deltas.set_data(deltas_x, deltas_y)
+            self.ax_deltas.set_xlim(0, max(deltas_x))
+            self.ax_deltas.set_ylim(0, max(deltas_y) if deltas_y else 1)
 
-        if len(avg_frame_rates) > 0:
+        if len(self.avg_frame_rates) > 0:
             # Update average FPS
-            fps_x = capture_times[-len(avg_frame_rates):]
-            fps_y = avg_frame_rates
-            line_avg_fps.set_data(fps_x, fps_y)
-            ax_fps.set_xlim(0, max(fps_x))
-            ax_fps.set_ylim(0, max(fps_y) if fps_y else 1)
+            fps_x = self.capture_times[-len(self.avg_frame_rates):]
+            fps_y = self.avg_frame_rates
+            self.line_avg_fps.set_data(fps_x, fps_y)
+            self.ax_fps.set_xlim(0, max(fps_x))
+            self.ax_fps.set_ylim(0, max(fps_y) if fps_y else 1)
 
-        canvas.draw()
+        self.canvas.draw()
 
-        if running:
-            root.after(500, update_chart)
-
-    def save_data_to_csv():
+    def save_data_to_csv(self):
         """Save timestamps, deltas, and average effective frame rates to a CSV file."""
         print("Saving data to CSV...")
         with open("webcam_test_data.csv", mode="w", newline="") as file:
             writer = csv.writer(file)
-            print("Writing header to CSV...")
             writer.writerow(["Timestamp (s)", "Delta (ms)", "Average Effective FPS"])
-            for i in range(len(capture_times)):
-                timestamp = capture_times[i]
-                delta = deltas[i] * 1000 if i < len(deltas) else ""
-                avg_fps = avg_frame_rates[i - 24] if i >= 24 else ""
+            for i in range(len(self.capture_times)):
+                timestamp = self.capture_times[i]
+                delta = self.deltas[i] * 1000 if i < len(self.deltas) else ""
+                avg_fps = self.avg_frame_rates[i] if i < len(self.avg_frame_rates) else ""
                 writer.writerow([timestamp, delta, avg_fps])
-
-    def on_close():
-        """Handle the window close event."""
-        nonlocal running
-        running = False
-        vc.release()
-        save_data_to_csv()  # Save data to CSV before closing
-        root.destroy()
-
-    root.protocol("WM_DELETE_WINDOW", on_close)
-    update_chart()
-    update_webcam()
-    root.mainloop()
-
-    # Ensure the root window is destroyed after the test
-    if root.winfo_exists():
-        root.destroy()
-
-    return {
-        "resolution": f"{width} x {height}",
-        "captured_frames": frame_count,
-        "deltas": deltas,
-        "avg_frame_rates": avg_frame_rates
-    }
 
 def main():
     """Main function to test multiple resolutions with live charts."""
+    app = QApplication(sys.argv)
     resolutions = [
         (640, 480),
         (1920, 1080)
     ]
-    results = []
-
     for width, height in resolutions:
         print(f"Starting test for resolution {width} x {height}")
-        result = testWebcamLiveChart(width, height, 60)  # 60 seconds duration
-        if result:
-            results.append(result)
-            print(f"Resolution {result['resolution']}: SUCCESS, Frames Captured: {result['captured_frames']}")
-        else:
-            print(f"Resolution {width} x {height}: FAILED")
-
-    print("\nSummary of Results:")
-    for result in results:
-        print(f"Resolution {result['resolution']}: Captured Frames: {result['captured_frames']}")
-
-    # Save all results to a CSV file
-    print("Saving all results to CSV...")
-    with open("webcam_test_data.csv", mode="w", newline="") as file:
-        writer = csv.writer(file)
-        writer.writerow(["Resolution", "Timestamp (s)", "Delta (ms)", "Average Effective FPS"])
-        for result in results:
-            resolution = result["resolution"]
-            capture_times = result["deltas"]
-            deltas = result["deltas"]
-            avg_frame_rates = result["avg_frame_rates"]
-            for i in range(len(capture_times)):
-                timestamp = capture_times[i]
-                delta = deltas[i] * 1000 if i < len(deltas) else ""
-                avg_fps = avg_frame_rates[i - 24] if i >= 24 else ""
-                writer.writerow([resolution, timestamp, delta, avg_fps])
+        window = WebcamTest(width, height, 60)  # 60 seconds duration
+        window.show()
+        app.exec_()
 
 if __name__ == "__main__":
     main()
