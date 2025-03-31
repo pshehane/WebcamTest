@@ -1,3 +1,4 @@
+import os
 import cv2
 import time
 import tkinter as tk
@@ -5,11 +6,25 @@ from tkinter import ttk
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 import csv
+import platform
+import warnings
+
+# Suppress deprecation warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+
+# Ensure Tkinter works correctly on MacOS
+os.environ["TK_SILENCE_DEPRECATION"] = "1"
 
 def testWebcamLiveChart(requested_width, requested_height, duration=30):
     """Test the webcam at a specific resolution for a given duration with a live chart."""
     print(f"Testing {requested_width} x {requested_height} for {duration} seconds")
-    vc = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+
+    # Use platform-specific backend for webcam capture
+    if platform.system() == "Darwin":  # MacOS
+        vc = cv2.VideoCapture(0, cv2.CAP_AVFOUNDATION)
+    else:  # Default to Windows (or other platforms)
+        vc = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+
     vc.set(cv2.CAP_PROP_FRAME_WIDTH, requested_width)
     vc.set(cv2.CAP_PROP_FRAME_HEIGHT, requested_height)
 
@@ -94,7 +109,7 @@ def testWebcamLiveChart(requested_width, requested_height, duration=30):
             # Resize frame to 640x480 before displaying
             frame = cv2.resize(frame, (640, 480))
             # Convert frame to RGB and display in Tkinter
-            #frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             frame_image = tk.PhotoImage(data=cv2.imencode(".ppm", frame)[1].tobytes())
             webcam_label.image = frame_image  # Persist the PhotoImage object
             webcam_label.configure(image=frame_image)
@@ -169,14 +184,14 @@ def testWebcamLiveChart(requested_width, requested_height, duration=30):
 def main():
     """Main function to test multiple resolutions with live charts."""
     resolutions = [
-        #(640, 480),
+        (640, 480),
         (1920, 1080)
     ]
     results = []
 
     for width, height in resolutions:
         print(f"Starting test for resolution {width} x {height}")
-        result = testWebcamLiveChart(width, height, 60*60)  # 60 seconds duration
+        result = testWebcamLiveChart(width, height, 60)  # 60 seconds duration
         if result:
             results.append(result)
             print(f"Resolution {result['resolution']}: SUCCESS, Frames Captured: {result['captured_frames']}")
